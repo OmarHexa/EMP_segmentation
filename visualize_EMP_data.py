@@ -6,7 +6,7 @@ import numpy as np
 
 
 
-
+os.chdir("/home/omar/code/pytorch")
 images_dir =os.path.join(os.getcwd(),"archive/images")
 segmaps_dir =os.path.join(os.getcwd(),"archive/segmaps")
 
@@ -25,6 +25,8 @@ for i in range(0, 6, 2):
     image = cv.imread(os.path.join(images_dir, fn),0)
     # image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
     segmap = cv.imread(os.path.join(segmaps_dir, fn),cv.IMREAD_UNCHANGED)
+    # segmap = (segmap>0)
+    print(image.shape)
     axes[i].imshow(image)
     axes[i+1].matshow(segmap, cmap='tab20')
 plt.show()

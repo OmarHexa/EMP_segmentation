@@ -22,13 +22,9 @@ class DoubleConv(nn.Module):
 class UNET(nn.Module):
     def __init__(self,in_channels,out_channels):
         super(UNET,self).__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
         self.features = [64,128,256,512]
-
         self.down = nn.ModuleList()
         self.up = nn.ModuleList()
-
         self.pool = nn.MaxPool2d(kernel_size=2,stride=2)
 
         for feature in self.features:
@@ -36,11 +32,11 @@ class UNET(nn.Module):
             in_channels =feature
 
         for feature in reversed(self.features):
-            self.up.append(nn.ConvTranspose2d(2*feature,feature,2,2))
+            self.up.append(nn.ConvTranspose2d(2*feature,feature,kernel_size=2,stride=2))
             self.up.append(DoubleConv(feature*2,feature))
 
         self.bottom = DoubleConv(self.features[-1],self.features[-1]*2)
-        self.final_conv = nn.Conv2d(self.features[0],out_channels,1)
+        self.final_conv = nn.Conv2d(self.features[0],out_channels,kernel_size=1)
 
     def forward(self,x):
         skip_connection =[]
@@ -51,7 +47,7 @@ class UNET(nn.Module):
             x =self.pool(x)
         
         x= self.bottom(x)
-        # skip_connection = skip_connection[::-1]
+
         skip_connection = list(reversed(skip_connection))
 
         for idx in range(0,len(self.up),2):
@@ -68,8 +64,8 @@ class UNET(nn.Module):
 
 
 def Test():
-    x = torch.randn((3,1,160,240))
-    model =UNET(1,1)
+    x = torch.randn((3,3,160,240))
+    model =UNET(3,1)
     preds =model(x)
 
     print(preds.shape)
