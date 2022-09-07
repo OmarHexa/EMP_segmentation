@@ -5,13 +5,15 @@ import torch.nn as nn
 
 
 class DoubleConv(nn.Module):
-    def __init__(self,in_channel,out_channels) -> None:
+    def __init__(self,in_channel,out_channels,mid_channels=None) -> None:
         super(DoubleConv,self).__init__()
+        if not mid_channels:
+            mid_channels=out_channels
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channel,out_channels,3,1,1,bias=False),
+            nn.Conv2d(in_channel,mid_channels,3,1,1,bias=False),
             nn.ReLU(), 
-            nn.BatchNorm2d(out_channels),
-            nn.Conv2d(out_channels,out_channels,3,1,1,bias=False),
+            nn.BatchNorm2d(mid_channels),
+            nn.Conv2d(mid_channels,out_channels,3,1,1,bias=False),
             nn.ReLU(),
             nn.BatchNorm2d(out_channels)
         )
@@ -32,10 +34,10 @@ class UNET(nn.Module):
             in_channels =feature
 
         for feature in reversed(self.features):
-            self.up.append(nn.ConvTranspose2d(2*feature,feature,kernel_size=2,stride=2))
-            self.up.append(DoubleConv(feature*2,feature))
+            self.up.append(nn.UpsamplingBilinear2d(scale_factor=2))
+            self.up.append(DoubleConv(feature*2,feature//2,feature))
 
-        self.bottom = DoubleConv(self.features[-1],self.features[-1]*2)
+        self.bottom = DoubleConv(self.features[-1],self.features[-1])
         self.final_conv = nn.Conv2d(self.features[0],out_channels,kernel_size=1)
 
     def forward(self,x):
@@ -56,7 +58,13 @@ class UNET(nn.Module):
             if x.shape!= connection.shape:
                 x= torchvision.transforms.functional.resize(x,size = connection.shape[2:])
             x= torch.concat((x,connection),dim=1)
-            x = self.up[idx+1](x)
+            print(idx)
+            print(len(self.up)-2)
+            if (idx==(len(self.up)-2)):
+                x=DoubleConv(self.features[0]*2,self.features[0])(x)
+            else:
+                x = self.up[idx+1](x)
+
 
         return self.final_conv(x)
 
