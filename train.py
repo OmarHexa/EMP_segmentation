@@ -1,98 +1,154 @@
 
 
-import torch
-# import torchvision
+
+
+
+import torch.optim
+import torchvision
 from torch.utils.data import DataLoader, random_split
-import torch.functional as F
 import torch.nn as nn
-import torchvision.transforms as transforms
 from EMP_data import EmpDataset
-from Unet import UNET
+from Unet import UNET, UNETBilinear
 import os
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import cv2 as cv
+from tqdm import tqdm
+from utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages,DiceBCELoss)
+from torch.utils.tensorboard import SummaryWriter
+writer=SummaryWriter("runs/empUnetDice")
+
 #hyper-parameters
-BATCH_SIZE = 20
-LEARNING_RATE =1e-4
+BATCH_SIZE = 10
+LEARNING_RATE =0.0001
 NUM_EPOCHS = 2
 NUM_WORKERS =1
-PIN_MEMORY= False
-
-#setting the datasets path and finally dataset
-os.chdir("/home/omar/code/pytorch")
-dir= os.getcwd()
-image_dir = os.path.join(dir,"archive/images")
-seg_dir = os.path.join(dir,"archive/segmaps")
-transform = transforms.Compose([transforms.ToTensor(),transforms.Resize((256,256))])
-data = EmpDataset(image_dir,seg_dir,transform=transform)
-
-#split the data set and load the data in batch to dataloader
-train_data, val_data = random_split(data,(300,165))
-train_dataloder = DataLoader(dataset=train_data,batch_size=BATCH_SIZE,shuffle=True)
-val_dataloder = DataLoader(dataset=val_data,batch_size=BATCH_SIZE,shuffle=False)
+IMAGE_HEIGHT = 256
+IMAGE_WEDITH = 256
+ITERATION = 2
+LOAD_MODEL = False
+IMG_DIR = "/home/omar/code/pytorch/archive/images"
+SEG_DIR = "/home/omar/code/pytorch/archive/segmaps"
 
 
-# setup model, loss funciton and optimizer
-model = UNET(3,1)
-criterion = nn.BCEWithLogitsLoss()
-optimizer = torch.optim.Adam(model.parameters(),lr=LEARNING_RATE)
+def trainFnCPU(loader, model, optimizer, lossFn, iter, epoch,Writer=False):
+    loop = tqdm(loader)
+    runningLoss =0
+    for idx, (img, seg) in enumerate(loop):
+        seg = (seg>0).float().unsqueeze(1)
 
-
-def quick_train(dataLoader,model,lossFun,optimizer):
-    im,seg =next(iter(dataLoader))
-    seg = (seg>0).float()
-    for epoch in range(NUM_EPOCHS):
-        optimizer.zero_grad()
-        pred = model(im)
-        loss =lossFun(pred,seg)
-        loss.backward()
-        optimizer.step()
-        print(f"epoch:{epoch}/{NUM_EPOCHS}, loss={loss}")    
-
-# this code is quick development pupose only
-def training(numEpochs,dataLoader,model,lossFun,optimizer):
-    for epoch in range(NUM_EPOCHS):
-        for idx, (image,segment) in enumerate(train_dataloder):
-            segment = (segment>0).float()
-            predict = model(image)
-            loss = criterion(predict,segment)
-            loss.backward()
-            optimizer.step()
+        # forward
+        preds = model(img)
+        loss = lossFn(preds, seg)
+        loss = loss/iter #mean loss over the iteration
+        runningLoss+= loss.item()
+        # backward
+        loss.backward() #gradient accumulation
+        if ((idx+1)%iter==0) or ((idx+1)==len(loader)):
+            optimizer.step() 
             optimizer.zero_grad()
+            loop.set_postfix(loss=loss.item())
+            if Writer:  
+                writer.add_scalar("trainingLoss",runningLoss/iter,epoch*len(loader)+idx) #tensorboard loss update
+                runningLoss=0
 
-            if (idx+1)%10==0:
-                print(f'epoch: {epoch}/{NUM_EPOCHS}, step:{idx}/{len(train_dataloder)}')
-        
 
-def save_checkpoint(model,path):
-    torch.save(model.state_dict(),path)
-def load_checkpoint(model,path):
-    model.load_state_dict(torch.load(path))
 
-def check_accuracy(model,valLoader):
-    num_correct =0
-    num_pixels= 0
-    dice_score =0
-    model.eval()
+ # this code is quick development pupose only
+def quickTrain(loader,model,lossFun,optimizer):
+    im,seg =next(iter(loader))
+    seg = (seg>0).float().unsqueeze(1)
+    optimizer.zero_grad()
+    pred = model(im)
+    loss =lossFun(pred,seg)
+    loss.backward()
+    optimizer.step()
+    print(f"loss={loss.item()}, Predicted image shape: {pred.shape}")
+
+
+
+def trainFnGPU(loader,model,optimizer,lossFun,iter):
+    Device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(Device)
+    scaler = torch.cuda.amp.GradScaler()
+    loop = tqdm(loader)
+    for idx, (image,segment) in enumerate(loop):
+            image =image.to(Device)
+            segment=segment.to(Device)
+            segment = (segment>0).float()
+            with torch.cuda.amp.autocast():
+                predict = model(image)
+                loss = lossFun(predict,segment)
+                loss =loss/iter
+            scaler.scale(loss).backward()
+            if ((idx+1)%iter==0) or ((idx+1)==len(loader)):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+                loop.set_postfix(loss=loss.item())
+
+    model.to("cpu")
+
+   
+
+def main(Bilinear=False):
+
+    transform= A.Compose([A.Resize(IMAGE_HEIGHT,IMAGE_WEDITH),
+                                A.Rotate(limit=35, p=1.0,interpolation=cv.BORDER_CONSTANT),
+                                A.HorizontalFlip(p=0.5),
+                                A.VerticalFlip(p=0.1),
+                                A.Normalize(mean=(0.47759078,0.47759078,0.47759078),
+                                        std=(0.2459953,0.2459953,0.2459953)),
+                                        ToTensorV2()])
+
+    data = EmpDataset(IMG_DIR,SEG_DIR,augmentation=transform)
+
+    #split the data set and load the data in batch to dataloader
+    trainDataSize = int(len(data)*0.8)
+    valDataSize = len(data)-trainDataSize
+
+    print(f"Training Data Size: {trainDataSize}, Validation Data Size: {valDataSize} Effective Batch Size: {BATCH_SIZE*ITERATION}")
+    trainData, valData = random_split(data,(trainDataSize,valDataSize))
+    trainDataloder = DataLoader(dataset=trainData,batch_size=BATCH_SIZE,shuffle=True)
+    valDataloder = DataLoader(dataset=valData,batch_size=BATCH_SIZE,shuffle=False)
+
+
+    # setup model, loss funciton and optimizer
+    model = UNETBilinear(3,1) if Bilinear else UNET(3,1)
+    # criterion = nn.BCEWithLogitsLoss()
+    criterion = DiceBCELoss()
+    optimizer = torch.optim.Adam(model.parameters(),lr=LEARNING_RATE)
     
-    for img,seg in valLoader:
-        seg = (seg>0).float()
-        pred =torch.sigmoid(model(img))
-        pred = (pred>0.5).float()
+    exImg,_=next(iter(trainDataloder))
+    image_grid = torchvision.utils.make_grid(exImg)
+    writer.add_image("EMP_images",image_grid)
+    writer.add_graph(model,exImg)
 
-        num_correct += (pred== seg).sum()
-        num_pixels+= torch.numel(pred)
-        dice_score += (2 * (pred * seg).sum()) / (
-                (pred + seg).sum() + 1e-8
-            )
+    if LOAD_MODEL:
+        loadModel(torch.load("my_checkpoint.pth.tar"), model)
+    ModelSize(model)
 
-    print(
-        f"Got {num_correct}/{num_pixels} with acc {num_correct/num_pixels*100:.2f}"
-    )
-    print(f"Dice score: {dice_score/len(valLoader)}")
-    model.train()
+
+    for epoch in range(NUM_EPOCHS):
+        trainFnCPU(trainDataloder,model,optimizer,criterion,ITERATION,epoch,Writer=True)
+
+        #save model
+        checkPoint= {
+                    "state_dice":model.state_dict(),
+                    "optimizer":optimizer.state_dict,
+                    "epoch":epoch
+                    }
+        saveCheckpoint(checkPoint)
+        # quickTrain(trainDataloder,model,criterion,optimizer)
+
+        checkaccuarcy(valDataloder,model)
+
+        savePredAsImages(valDataloder,model)
+
+
+
+
+
 
 if __name__=="__main__":
-    # quick_train(train_dataloder,model,criterion,optimizer)
-
-    training(NUM_EPOCHS,train_dataloder,model,criterion,optimizer)
-    save_checkpoint(model,"UNET_EMP.pth")
-    check_accuracy(model,val_dataloder)
+    main(Bilinear=True)
