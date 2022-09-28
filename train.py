@@ -21,7 +21,7 @@ writer=SummaryWriter("runs/empUnetDice")
 #hyper-parameters
 BATCH_SIZE = 10
 LEARNING_RATE =0.0001
-NUM_EPOCHS = 2
+NUM_EPOCHS = 20
 NUM_WORKERS =1
 IMAGE_HEIGHT = 256
 IMAGE_WEDITH = 256
@@ -151,4 +151,4 @@ def main(Bilinear=False):
 
 
 if __name__=="__main__":
-    main(Bilinear=True)
+    main(Bilinear=False)
