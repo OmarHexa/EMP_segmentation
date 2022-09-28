@@ -11,6 +11,6 @@ Got 5597443/6094848 with acc 91.84\
 Dice score: 0.8946062326431274
 
 Actual Segmentation -
-![](predictionImages\2.png)
+![](https://github.com/OmarHexa/EMP_segmentation/blob/bilinear/predictionImages/2.png)
 Predicted segmentation -
-![](predictionImages\preds2.png)
+![](https://github.com/OmarHexa/EMP_segmentation/blob/bilinear/predictionImages/preds2.png)
