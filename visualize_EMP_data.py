@@ -23,6 +23,7 @@ for ax in axes:
 for i in range(0, 6, 2):
     fn = f'{random.sample(fns, 1)[0]}.png'
     image = cv.imread(os.path.join(images_dir, fn),0)
+    print(image.shape)
     # image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
     segmap = cv.imread(os.path.join(segmaps_dir, fn),cv.IMREAD_UNCHANGED)
     # segmap = (segmap>0)
