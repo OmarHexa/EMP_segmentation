@@ -1,7 +1,7 @@
 import torch.optim
 import torchvision
 from dataset.EMP_datamodule import EmpDataModule
-from model.Unet import UNET, UNETBilinear
+from src.model.networks.Unet import UNET, UNETBilinear
 from tqdm import tqdm
 from utils.utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages,DiceBCELoss)
 
@@ -91,7 +91,6 @@ def main(Bilinear=False):
     datamodule.setup()
     exImg,_=next(iter(datamodule.train_dataloader()))
     image_grid = torchvision.utils.make_grid(exImg)
-
 
     if LOAD_MODEL:
         loadModel(torch.load("my_checkpoint.pth.tar"), model)

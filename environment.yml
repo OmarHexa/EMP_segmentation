@@ -6,13 +6,8 @@ channels:
 dependencies:
   - python>=3.7
   - pip
-  - pytorch=2.0.0
-  - torchvision=0.15
-  - opencv
-  - albumentations
   - jupyterlab
   - pip:
-    - torchsummary
-    - matplotlib==2.0.0
+    - -r requirment.txt
 
 
