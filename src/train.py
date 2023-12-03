@@ -7,16 +7,16 @@ import torch.optim
 import torchvision
 from torch.utils.data import DataLoader, random_split
 import torch.nn as nn
-from EMP_data import EmpDataset
-from Unet import UNET, UNETBilinear
+from src.dataset.EMP_datamodule import EmpDataset
+from model.Unet import UNET, UNETBilinear
 import os
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2 as cv
 from tqdm import tqdm
-from utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages,DiceBCELoss)
-from torch.utils.tensorboard import SummaryWriter
-writer=SummaryWriter("runs/empUnetDice")
+from utils.utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages,DiceBCELoss)
+# from torch.utils.tensorboard import SummaryWriter
+# writer=SummaryWriter("runs/empUnetDice")
 
 #hyper-parameters
 BATCH_SIZE = 10
@@ -27,8 +27,8 @@ IMAGE_HEIGHT = 256
 IMAGE_WEDITH = 256
 ITERATION = 2
 LOAD_MODEL = False
-IMG_DIR = "/home/omar/code/pytorch/archive/images"
-SEG_DIR = "/home/omar/code/pytorch/archive/segmaps"
+IMG_DIR = "/home/omar/code/pytorch/EMP_data/images"
+SEG_DIR = "/home/omar/code/pytorch/EMP_data/segmaps"
 
 
 def trainFnCPU(loader, model, optimizer, lossFn, iter, epoch,Writer=False):
@@ -48,9 +48,9 @@ def trainFnCPU(loader, model, optimizer, lossFn, iter, epoch,Writer=False):
             optimizer.step() 
             optimizer.zero_grad()
             loop.set_postfix(loss=loss.item())
-            if Writer:  
-                writer.add_scalar("trainingLoss",runningLoss/iter,epoch*len(loader)+idx) #tensorboard loss update
-                runningLoss=0
+            # if Writer:  
+                # writer.add_scalar("trainingLoss",runningLoss/iter,epoch*len(loader)+idx) #tensorboard loss update
+                # runningLoss=0
 
 
 
@@ -121,8 +121,8 @@ def main(Bilinear=False):
     
     exImg,_=next(iter(trainDataloder))
     image_grid = torchvision.utils.make_grid(exImg)
-    writer.add_image("EMP_images",image_grid)
-    writer.add_graph(model,exImg)
+    # writer.add_image("EMP_images",image_grid)
+    # writer.add_graph(model,exImg)
 
     if LOAD_MODEL:
         loadModel(torch.load("my_checkpoint.pth.tar"), model)
@@ -130,7 +130,7 @@ def main(Bilinear=False):
 
 
     for epoch in range(NUM_EPOCHS):
-        trainFnCPU(trainDataloder,model,optimizer,criterion,ITERATION,epoch,Writer=True)
+        quickTrain(trainDataloder,model,optimizer,criterion,ITERATION,epoch)
 
         #save model
         checkPoint= {
