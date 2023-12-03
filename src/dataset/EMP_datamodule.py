@@ -43,7 +43,7 @@ class EmpDataModule(pl.LightningDataModule):
         super().__init__()
         self.dir: str = data_dir
         self.img_transform= transforms.Compose([
-                        transforms.Resize((256, 256)),
+                        transforms.Resize((256, 256),antialias=None),
                         transforms.RandomRotation(degrees=35),
                         transforms.RandomHorizontalFlip(p=0.5),
                         transforms.RandomVerticalFlip(p=0.1),
@@ -55,7 +55,7 @@ class EmpDataModule(pl.LightningDataModule):
                         ])
         self.mask_transform = transforms.Compose([
                                 transforms.ToTensor(),
-                                transforms.Resize((256,256))
+                                transforms.Resize((256,256),antialias=None)
                             ])
         self.batch_size: int = batch_size
         self.train_dataset: Optional[Dataset]= None

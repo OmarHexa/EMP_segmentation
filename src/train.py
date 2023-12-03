@@ -91,8 +91,7 @@ def main(Bilinear=False):
     datamodule.setup()
     exImg,_=next(iter(datamodule.train_dataloader()))
     image_grid = torchvision.utils.make_grid(exImg)
-    # writer.add_image("EMP_images",image_grid)
-    # writer.add_graph(model,exImg)
+
 
     if LOAD_MODEL:
         loadModel(torch.load("my_checkpoint.pth.tar"), model)
