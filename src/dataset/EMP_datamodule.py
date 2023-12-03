@@ -1,48 +1,48 @@
 
 import os
-from torch.utils.data import Dataset,DataLoader,random_split,IterableDataset
-import cv2 as cv
-import numpy as np
+from torch.utils.data import Dataset,DataLoader,random_split
+from PIL import Image
+import torch
 from torchvision import transforms
 import pytorch_lightning as pl
-
-# Transfomation is only applied to 
+from typing import Optional,List,Tuple
 
 class EmpDataset(Dataset):
-    def __init__(self,image_dir,seg_dir, augmentation= None) -> None:
+    def __init__(self, data_dir: str, img_transform= None, mask_transform = None) -> None:
         super(EmpDataset,self).__init__()
+        self.image_dir: str = os.path.join(data_dir,"images")
+        self.seg_dir: str = os.path.join(data_dir,"segmaps")
+        self.img_transform = img_transform
+        self.mask_transform = mask_transform
+        self.images: List[str] = os.listdir(self.image_dir)
 
-        self.image_dir =image_dir
-        self.seg_dir = seg_dir
-        self.augmentation = augmentation
-        self.images = os.listdir(self.image_dir)
+
+    def __getitem__(self, index)-> Tuple[torch.Tensor|Image.Image, torch.Tensor|Image.Image]:
+        image_name:str = self.images[index]
+        image_path:str = os.path.join(self.image_dir, image_name)
+        mask_path: str = os.path.join(self.seg_dir, image_name)
+
+        # Open images as PIL Image
+        image:Image.Image = Image.open(image_path)
+        mask:Image.Image = Image.open(mask_path)
 
 
-    def __getitem__(self, index):
-        image_name = self.images[index]
-        image_path = os.path.join(self.image_dir, image_name)
-        mask_path = os.path.join(self.seg_dir, image_name)
-
-        image = np.array(cv.imread(image_path, cv.IMREAD_UNCHANGED), dtype=np.float32)
-        mask = np.array(cv.imread(mask_path, cv.IMREAD_UNCHANGED), dtype=np.float32)
-
-        if self.transform:
-            image = self.transform(image)
-            mask = self.transform(mask)
+        if self.img_transform:
+            image = self.img_transform(image)
+        if self.mask_transform:
+            mask = self.mask_transform(mask)
 
         return image, mask
 
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.images)
 
 class EmpDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, batch_size=32):
+    def __init__(self, data_dir: str, batch_size: int =32) -> None:
         super().__init__()
-        self.image_dir = os.path.join(data_dir,"images")
-        self.seg_dir = os.path.join(dir,"segmaps")
-        self.transform= transforms.Compose([
-                        transforms.ToPILImage(),
+        self.dir: str = data_dir
+        self.img_transform= transforms.Compose([
                         transforms.Resize((256, 256)),
                         transforms.RandomRotation(degrees=35),
                         transforms.RandomHorizontalFlip(p=0.5),
@@ -53,13 +53,22 @@ class EmpDataModule(pl.LightningDataModule):
                         std=(0.2459953, 0.2459953, 0.2459953)
                             )
                         ])
-        self.data = EmpDataset(image_dir=self.image_dir, seg_dir=self.seg_dir, augmentation=self.transform)
-        self.batch_size = batch_size
+        self.mask_transform = transforms.Compose([
+                                transforms.ToTensor(),
+                                transforms.Resize((256,256))
+                            ])
+        self.batch_size: int = batch_size
+        self.train_dataset: Optional[Dataset]= None
+        self.val_dataset: Optional[Dataset]= None
+
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            trainDataSize = int(len(self.data)*0.8)
-            valDataSize = len(self.data)-trainDataSize
-            self.train_dataset,self.val_dataset = random_split(self.data,(trainDataSize,valDataSize))
+            data: Dataset = EmpDataset(data_dir=self.dir,
+                              img_transform=self.img_transform,
+                              mask_transform=self.mask_transform)
+            trainDataSize: int = int(len(data)*0.8)
+            valDataSize: int = len(data)-trainDataSize
+            self.train_dataset,self.val_dataset = random_split(data,(trainDataSize,valDataSize))
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
@@ -69,11 +78,30 @@ class EmpDataModule(pl.LightningDataModule):
 
     def test_dataloader(self):
         pass
-    
+
+
+# Function to test the data module
+def test_data_module(data_module: EmpDataModule) -> None:
+    data_module.setup()
+    # Access dataloaders
+    train_dataloader: DataLoader = data_module.train_dataloader()
+    val_dataloader: DataLoader = data_module.val_dataloader()
+
+    # Perform a quick test to check if dataloaders are working
+    for batch in train_dataloader:
+        images, masks = batch
+        print(images.shape, masks.shape)
+        # Perform necessary testing logic here
+        break  # Only process one batch for testing purposes
+
+    for batch in val_dataloader:
+        images, masks = batch
+        print(images.shape, masks.shape)
+        break  # Only process one batch for testing purposes
 #To test the data class 
 if __name__=="__main__":
     os.chdir("/home/omar/code/pytorch/EMP_data/")
     BATCH_SIZE = 20
     dir= os.getcwd()
     module = EmpDataModule(dir,BATCH_SIZE)
-    module.setup(stage="fit")
+    test_data_module(module)

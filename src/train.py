@@ -1,22 +1,9 @@
-
-
-
-
-
 import torch.optim
 import torchvision
-from torch.utils.data import DataLoader, random_split
-import torch.nn as nn
-from src.dataset.EMP_datamodule import EmpDataset
+from dataset.EMP_datamodule import EmpDataModule
 from model.Unet import UNET, UNETBilinear
-import os
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
-import cv2 as cv
 from tqdm import tqdm
 from utils.utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages,DiceBCELoss)
-# from torch.utils.tensorboard import SummaryWriter
-# writer=SummaryWriter("runs/empUnetDice")
 
 #hyper-parameters
 BATCH_SIZE = 10
@@ -27,8 +14,7 @@ IMAGE_HEIGHT = 256
 IMAGE_WEDITH = 256
 ITERATION = 2
 LOAD_MODEL = False
-IMG_DIR = "/home/omar/code/pytorch/EMP_data/images"
-SEG_DIR = "/home/omar/code/pytorch/EMP_data/segmaps"
+DIRECTROY = "/home/omar/code/pytorch/EMP_data/"
 
 
 def trainFnCPU(loader, model, optimizer, lossFn, iter, epoch,Writer=False):
@@ -93,24 +79,7 @@ def trainFnGPU(loader,model,optimizer,lossFun,iter):
 
 def main(Bilinear=False):
 
-    transform= A.Compose([A.Resize(IMAGE_HEIGHT,IMAGE_WEDITH),
-                                A.Rotate(limit=35, p=1.0,interpolation=cv.BORDER_CONSTANT),
-                                A.HorizontalFlip(p=0.5),
-                                A.VerticalFlip(p=0.1),
-                                A.Normalize(mean=(0.47759078,0.47759078,0.47759078),
-                                        std=(0.2459953,0.2459953,0.2459953)),
-                                        ToTensorV2()])
-
-    data = EmpDataset(IMG_DIR,SEG_DIR,augmentation=transform)
-
-    #split the data set and load the data in batch to dataloader
-    trainDataSize = int(len(data)*0.8)
-    valDataSize = len(data)-trainDataSize
-
-    print(f"Training Data Size: {trainDataSize}, Validation Data Size: {valDataSize} Effective Batch Size: {BATCH_SIZE*ITERATION}")
-    trainData, valData = random_split(data,(trainDataSize,valDataSize))
-    trainDataloder = DataLoader(dataset=trainData,batch_size=BATCH_SIZE,shuffle=True)
-    valDataloder = DataLoader(dataset=valData,batch_size=BATCH_SIZE,shuffle=False)
+    datamodule = EmpDataModule(DIRECTROY,BATCH_SIZE)
 
 
     # setup model, loss funciton and optimizer
@@ -119,7 +88,8 @@ def main(Bilinear=False):
     criterion = DiceBCELoss()
     optimizer = torch.optim.Adam(model.parameters(),lr=LEARNING_RATE)
     
-    exImg,_=next(iter(trainDataloder))
+    datamodule.setup()
+    exImg,_=next(iter(datamodule.train_dataloader()))
     image_grid = torchvision.utils.make_grid(exImg)
     # writer.add_image("EMP_images",image_grid)
     # writer.add_graph(model,exImg)
@@ -130,7 +100,7 @@ def main(Bilinear=False):
 
 
     for epoch in range(NUM_EPOCHS):
-        quickTrain(trainDataloder,model,optimizer,criterion,ITERATION,epoch)
+        quickTrain(datamodule.train_dataloader(),model,criterion, optimizer)
 
         #save model
         checkPoint= {
@@ -141,9 +111,9 @@ def main(Bilinear=False):
         saveCheckpoint(checkPoint)
         # quickTrain(trainDataloder,model,criterion,optimizer)
 
-        checkaccuarcy(valDataloder,model)
+        checkaccuarcy(datamodule.val_dataloader(),model)
 
-        savePredAsImages(valDataloder,model)
+        savePredAsImages(datamodule.val_dataloader(),model)
 
 
 
