@@ -36,10 +36,10 @@ class UnetLitModule(LightningModule):
     
 
     def __init__(
-        self,learning_rate=1e-3,
-    ) -> None:
+        self,learning_rate=1e-3,compile:bool=False
+        ) -> None:
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(logger=False)
         self.net = UNET(3,1)
         self.learning_rate = learning_rate
         # loss function
@@ -48,8 +48,16 @@ class UnetLitModule(LightningModule):
         # for averaging loss across batches
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
+        # for tracking best so far validation accuracy
+        self.val_acc_best = MaxMetric()
+        #Validation metrics
+        self.val_acc = torchmetrics.classification.Accuracy(task="binary",num_classes=1,threshold=0.5)
         self.val_f1 = torchmetrics.classification.F1Score(num_classes=1, task="binary", threshold=0.5)
         self.val_jaccard = torchmetrics.classification.JaccardIndex(num_classes=1, task="binary", threshold=0.5)
+        #Test metrics
+        self.test_acc = torchmetrics.classification.Accuracy(task="binary",num_classes=1,threshold=0.5)
+        self.test_f1 = torchmetrics.classification.F1Score(num_classes=1, task="binary", threshold=0.5)
+        self.test_jaccard = torchmetrics.classification.JaccardIndex(num_classes=1, task="binary", threshold=0.5)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         
@@ -75,26 +83,57 @@ class UnetLitModule(LightningModule):
 
         return loss
 
-
+    def on_train_start(self) -> None:
+        """Lightning hook that is called when training begins."""
+        # by default lightning executes validation step sanity checks before training starts,
+        # so it's worth to make sure validation metrics don't store results from these checks
+        self.val_loss.reset()
+        self.val_acc.reset()
+        self.val_acc_best.reset()
+    def on_train_epoch_end(self) -> None:
+        "Lightning hook that is called when a training epoch ends."
+        pass
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
 
         loss, y, logits = self.model_step(batch)
 
         # update and log metrics
-        self.val_loss(loss)
+        self.val_loss(loss) #using mean metrics 
         
         # Compute F1 Score and Jaccard Index
         y_pred = torch.sigmoid(logits)
         self.val_f1(y_pred, y>0)
         self.val_jaccard(y_pred, y>0)
+        self.val_acc(y_pred, y>0)
 
+        # update and log metrics
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log("val/f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/jaccard", self.val_jaccard, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/accuracy", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+    
+    def on_validation_epoch_end(self) -> None:
+        "Lightning hook that is called when a validation epoch ends."
+        acc = self.val_acc.compute()  # get current val acc
+        self.val_acc_best(acc)  # update best so far val acc
+        # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
+        # otherwise metric would be reset by lightning after each epoch
+        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
 
     def configure_optimizers(self) -> Dict[str, Any]:
         return torch.optim.Adam(self.net.parameters(),lr=self.learning_rate)
+    def setup(self, stage: str) -> None:
+        """Lightning hook that is called at the beginning of fit (train + validate), validate,
+        test, or predict.
+
+        This is a good hook when you need to build models dynamically or adjust something about
+        them. This hook is called on every process when using DDP.
+
+        :param stage: Either `"fit"`, `"validate"`, `"test"`, or `"predict"`.
+        """
+        if self.hparams.compile and stage == "fit":
+            self.net = torch.compile(self.net)
 
 def test_loss():
     # Instantiate the loss function

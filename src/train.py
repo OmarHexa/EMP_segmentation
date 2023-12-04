@@ -26,7 +26,7 @@ def main(Bilinear=False):
     # if LOAD_MODEL:
     #     loadModel(torch.load("my_checkpoint.pth.tar"), model)
     # ModelSize(model)
-    trainer = Trainer(accelerator="gpu",min_epochs=1,max_epochs=3,
+    trainer = Trainer(accelerator="gpu",
                       default_root_dir="./src/checkpoints",
                       precision="16-mixed",fast_dev_run=True)
     trainer.fit(model,datamodule)
