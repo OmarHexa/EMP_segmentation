@@ -4,129 +4,126 @@
 import torch
 import torchvision
 import torch.nn as nn
+import torch.nn.functional as F
 
 # encapsulate the double convulation operation on each feature extraction level
-
 class DoubleConv(nn.Module):
-    def __init__(self,in_channel,out_channels,mid_channels=None) -> None:
-        super(DoubleConv,self).__init__()
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
         if not mid_channels:
-            mid_channels=out_channels
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channel,mid_channels,3,1,1,bias=False),
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(mid_channels),
-            nn.ReLU(), 
-            nn.Conv2d(mid_channels,out_channels,3,1,1,bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU()
+            nn.ReLU(inplace=True)
         )
 
-    def forward(self,x):
+    def forward(self, x):
+        return self.double_conv(x)
+    
+class Down(nn.Module):
+    """Downscaling with maxpool then double conv"""
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv(in_channels, out_channels)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diffY = x2.size()[2] - x1.size()[2]
+        diffX = x2.size()[3] - x1.size()[3]
+
+        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
+                        diffY // 2, diffY - diffY // 2])
+        # if you have padding issues, see
+        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
+        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
+        x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 
-class UNETBilinear(nn.Module):
-    def __init__(self,in_channels,out_channels):
-        super(UNETBilinear,self).__init__()
-        self.features = [64,128,256,512]
-        self.down = nn.ModuleList()
-        self.up = nn.ModuleList()
-        self.pool = nn.MaxPool2d(kernel_size=2,stride=2)
 
-        # creates the operation chain from the input to the lowest part(encoder) of the model 
-        for feature in self.features:
-            self.down.append(DoubleConv(in_channels,feature))
-            in_channels =feature
+class OutConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
-        """ Upsampling can't increase the feature number we need to increase the feature by a 
-        additional step of convulation. so instead of convTransposed we do upsampling and conv2d.
-        In the double conv opeariton we added midchannel to solve this requirement of one extra
-        conv2d to increase the channel number."""
-        for feature in reversed(self.features):
-            self.up.append(nn.UpsamplingBilinear2d(scale_factor=2))
-            # DoubleConv without mid-channel at the last stage.
-            if feature!=self.features[0]:
-                self.up.append(DoubleConv(feature*2,feature//2,feature))
-            else:
-                self.up.append(DoubleConv(feature*2,feature))
-
-        # no increase in the number of channels in the bottom feature extraction part
-        self.bottom = DoubleConv(self.features[-1],self.features[-1])
-        self.final_conv = nn.Conv2d(self.features[0],out_channels,kernel_size=1)
-        # self.fixer= DoubleConv(self.features[0]*2,self.features[0])
-
-    def forward(self,x):
-        # To store the feature vector on each layer of down sampling
-        skip_connection =[]
-
-        for down in self.down:
-            x = down(x)
-            skip_connection.append(x)
-            x =self.pool(x)
-        
-        x= self.bottom(x)# no. of feature is 512 (unlike the original paper)
-
-        skip_connection = list(reversed(skip_connection))
-
-        for idx in range(0,len(self.up),2):
-            x = self.up[idx](x)
-            connection = skip_connection[idx//2] # beacuse idx increment is 2.
-            #simplest way to solve for size mismatch of the two vector. 
-            #TODO look for other method.
-            if x.shape!= connection.shape:
-                x= torchvision.transforms.functional.resize(x,size = connection.shape[2:])
-            x= torch.concat((x,connection),dim=1)
-            x = self.up[idx+1](x)
-
-        return self.final_conv(x)
-
-
+    def forward(self, x):
+        return self.conv(x)
 
 
 class UNET(nn.Module):
-    def __init__(self,in_channels,out_channels):
-        super(UNET,self).__init__()
-        self.features = [64,128,256,512]
-        self.down = nn.ModuleList()
-        self.up = nn.ModuleList()
-        self.pool = nn.MaxPool2d(kernel_size=2,stride=2)
+    def __init__(self, n_channels, n_classes, bilinear=True):
+        super().__init__()
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.bilinear = bilinear
 
-        for feature in self.features:
-            self.down.append(DoubleConv(in_channels,feature))
-            in_channels =feature
+        self.inc = (DoubleConv(n_channels, 64))
+        self.down1 = (Down(64, 128))
+        self.down2 = (Down(128, 256))
+        self.down3 = (Down(256, 512))
+        factor = 2 if bilinear else 1
+        self.down4 = (Down(512, 1024 // factor))
+        self.up1 = (Up(1024, 512 // factor, bilinear))
+        self.up2 = (Up(512, 256 // factor, bilinear))
+        self.up3 = (Up(256, 128 // factor, bilinear))
+        self.up4 = (Up(128, 64, bilinear))
+        self.outc = (OutConv(64, n_classes))
 
-        for feature in reversed(self.features):
-            self.up.append(nn.ConvTranspose2d(2*feature,feature,kernel_size=2,stride=2))
-            self.up.append(DoubleConv(feature*2,feature))
+    def forward(self, x):
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+        x = self.up1(x5, x4)
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+        logits = self.outc(x)
+        return logits
 
-        self.bottom = DoubleConv(self.features[-1],self.features[-1]*2)
-        self.final_conv = nn.Conv2d(self.features[0],out_channels,kernel_size=1)
-
-    def forward(self,x):
-        skip_connection =[]
-
-        for down in self.down:
-            x = down(x)
-            skip_connection.append(x)
-            x =self.pool(x)
-        
-        x= self.bottom(x)
-
-        skip_connection = list(reversed(skip_connection))
-
-        for idx in range(0,len(self.up),2):
-            x = self.up[idx](x)
-            connection = skip_connection[idx//2]
-            if x.shape!= connection.shape:
-                x= torchvision.transforms.functional.resize(x,size = connection.shape[2:])
-            x= torch.concat((x,connection),dim=1)
-            x = self.up[idx+1](x)
-
-        return self.final_conv(x)
-
-
+    def use_checkpointing(self):
+        self.inc = torch.utils.checkpoint(self.inc)
+        self.down1 = torch.utils.checkpoint(self.down1)
+        self.down2 = torch.utils.checkpoint(self.down2)
+        self.down3 = torch.utils.checkpoint(self.down3)
+        self.down4 = torch.utils.checkpoint(self.down4)
+        self.up1 = torch.utils.checkpoint(self.up1)
+        self.up2 = torch.utils.checkpoint(self.up2)
+        self.up3 = torch.utils.checkpoint(self.up3)
+        self.up4 = torch.utils.checkpoint(self.up4)
+        self.outc = torch.utils.checkpoint(self.outc)
 
 def Test():
-    x = torch.randn((10,3,256,256))
+    x = torch.randn((20,3,256,256))
     print(x.shape)
 
     model =UNET(3,1)
