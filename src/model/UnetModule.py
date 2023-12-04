@@ -36,19 +36,20 @@ class UnetLitModule(LightningModule):
     
 
     def __init__(
-        self,
+        self,learning_rate=1e-3,
     ) -> None:
         super().__init__()
-
+        self.save_hyperparameters()
         self.net = UNET(3,1)
-
+        self.learning_rate = learning_rate
         # loss function
         self.criterion = DiceBCELoss()
 
         # for averaging loss across batches
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
-        
+        self.val_f1 = torchmetrics.classification.F1Score(num_classes=1, task="binary", threshold=0.5)
+        self.val_jaccard = torchmetrics.classification.JaccardIndex(num_classes=1, task="binary", threshold=0.5)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         
@@ -77,18 +78,23 @@ class UnetLitModule(LightningModule):
 
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
-       
-        loss,_,_ = self.model_step(batch)
+
+        loss, y, logits = self.model_step(batch)
 
         # update and log metrics
         self.val_loss(loss)
-        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=True)
+        
+        # Compute F1 Score and Jaccard Index
+        y_pred = torch.sigmoid(logits)
+        self.val_f1(y_pred, y>0)
+        self.val_jaccard(y_pred, y>0)
 
-
-
+        self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log("val/f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/jaccard", self.val_jaccard, on_step=False, on_epoch=True, prog_bar=True)
 
     def configure_optimizers(self) -> Dict[str, Any]:
-        return torch.optim.Adam(self.net.parameters(),lr=0.001)
+        return torch.optim.Adam(self.net.parameters(),lr=self.learning_rate)
 
 def test_loss():
     # Instantiate the loss function

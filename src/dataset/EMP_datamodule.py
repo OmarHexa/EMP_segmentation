@@ -10,6 +10,7 @@ from typing import Optional,List,Tuple
 class EmpDataset(Dataset):
     def __init__(self, data_dir: str, img_transform= None, mask_transform = None) -> None:
         super(EmpDataset,self).__init__()
+        
         self.image_dir: str = os.path.join(data_dir,"images")
         self.seg_dir: str = os.path.join(data_dir,"segmaps")
         self.img_transform = img_transform
@@ -41,6 +42,7 @@ class EmpDataset(Dataset):
 class EmpDataModule(pl.LightningDataModule):
     def __init__(self, data_dir: str, batch_size: int =32) -> None:
         super().__init__()
+        self.save_hyperparameters()
         self.dir: str = data_dir
         self.img_transform= transforms.Compose([
                         transforms.Resize((256, 256),antialias=None),
