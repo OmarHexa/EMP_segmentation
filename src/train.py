@@ -2,7 +2,6 @@ import torch.optim
 import torchvision
 from dataset.EMP_datamodule import EmpDataModule
 from tqdm import tqdm
-from utils.utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages)
 from pytorch_lightning import Trainer
 from model.UnetModule import UnetLitModule
 #hyper-parameters
