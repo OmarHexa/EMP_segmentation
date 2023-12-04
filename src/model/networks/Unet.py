@@ -126,12 +126,13 @@ class UNET(nn.Module):
 
 
 def Test():
-    x = torch.randn((3,3,160,240))
+    x = torch.randn((10,3,256,256))
+    print(x.shape)
+
     model =UNET(3,1)
     preds =model(x)
 
     print(preds.shape)
-    print(x.shape)
 
 
 

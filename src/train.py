@@ -1,12 +1,12 @@
 import torch.optim
 import torchvision
 from dataset.EMP_datamodule import EmpDataModule
-from src.model.networks.Unet import UNET, UNETBilinear
 from tqdm import tqdm
 from utils.utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePredAsImages,DiceBCELoss)
-
+from pytorch_lightning import Trainer
+from model.UnetModule import UnetLitModule
 #hyper-parameters
-BATCH_SIZE = 10
+BATCH_SIZE = 2
 LEARNING_RATE =0.0001
 NUM_EPOCHS = 20
 NUM_WORKERS =1
@@ -34,16 +34,13 @@ def trainFnCPU(loader, model, optimizer, lossFn, iter, epoch,Writer=False):
             optimizer.step() 
             optimizer.zero_grad()
             loop.set_postfix(loss=loss.item())
-            # if Writer:  
-                # writer.add_scalar("trainingLoss",runningLoss/iter,epoch*len(loader)+idx) #tensorboard loss update
-                # runningLoss=0
 
 
 
  # this code is quick development pupose only
 def quickTrain(loader,model,lossFun,optimizer):
     im,seg =next(iter(loader))
-    seg = (seg>0).float().unsqueeze(1)
+    seg = (seg>0).float()
     optimizer.zero_grad()
     pred = model(im)
     loss =lossFun(pred,seg)
@@ -80,39 +77,14 @@ def trainFnGPU(loader,model,optimizer,lossFun,iter):
 def main(Bilinear=False):
 
     datamodule = EmpDataModule(DIRECTROY,BATCH_SIZE)
+    model = UnetLitModule()
 
+    # if LOAD_MODEL:
+    #     loadModel(torch.load("my_checkpoint.pth.tar"), model)
+    # ModelSize(model)
 
-    # setup model, loss funciton and optimizer
-    model = UNETBilinear(3,1) if Bilinear else UNET(3,1)
-    # criterion = nn.BCEWithLogitsLoss()
-    criterion = DiceBCELoss()
-    optimizer = torch.optim.Adam(model.parameters(),lr=LEARNING_RATE)
-    
-    datamodule.setup()
-    exImg,_=next(iter(datamodule.train_dataloader()))
-    image_grid = torchvision.utils.make_grid(exImg)
-
-    if LOAD_MODEL:
-        loadModel(torch.load("my_checkpoint.pth.tar"), model)
-    ModelSize(model)
-
-
-    for epoch in range(NUM_EPOCHS):
-        quickTrain(datamodule.train_dataloader(),model,criterion, optimizer)
-
-        #save model
-        checkPoint= {
-                    "state_dice":model.state_dict(),
-                    "optimizer":optimizer.state_dict,
-                    "epoch":epoch
-                    }
-        saveCheckpoint(checkPoint)
-        # quickTrain(trainDataloder,model,criterion,optimizer)
-
-        checkaccuarcy(datamodule.val_dataloader(),model)
-
-        savePredAsImages(datamodule.val_dataloader(),model)
-
+    trainer = Trainer(accelerator="cpu",min_epochs=1,max_epochs=3)
+    trainer.fit(model,datamodule)
 
 
 

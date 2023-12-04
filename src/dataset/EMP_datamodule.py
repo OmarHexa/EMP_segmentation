@@ -71,10 +71,10 @@ class EmpDataModule(pl.LightningDataModule):
             self.train_dataset,self.val_dataset = random_split(data,(trainDataSize,valDataSize))
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True,num_workers=2)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False)
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False,num_workers=2)
 
     def test_dataloader(self):
         pass

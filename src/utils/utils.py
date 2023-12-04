@@ -3,6 +3,9 @@ import torch
 import torchvision
 import os
 import torch.nn as nn
+import torch.nn.functional as F
+
+
 def saveCheckpoint(state,path="checkpoint.pth.tar"):
     print(f"====> saving checkpoint in directiory: {path}")
     torch.save(state,path)
@@ -100,3 +103,27 @@ class DiceBCELoss(nn.Module):
         Dice_BCE = BCE + dice_loss
         
         return Dice_BCE
+    
+# class DiceBCELoss(nn.Module):
+#     def __init__(self, weight=None, size_average=True):
+#         super().__init__()
+
+#     def forward(self, inputs, targets, smooth=1):
+#         # Comment out if your model contains a sigmoid or equivalent activation layer
+#         inputs = F.sigmoid(inputs)
+
+#         # Flatten label and prediction tensors
+#         inputs = inputs.view(-1)
+#         targets = targets.view(-1)
+
+#         intersection = (inputs * targets).sum()
+#         dice_loss = 1 - (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)
+        
+#         # Use binary_cross_entropy_with_logits instead of binary_cross_entropy
+#         BCE = F.binary_cross_entropy_with_logits(inputs, targets, reduction='mean')
+#         # Alternatively, you can use BCEWithLogitsLoss
+#         # BCE = nn.BCEWithLogitsLoss()(inputs, targets)
+
+#         Dice_BCE = BCE + dice_loss
+
+#         return Dice_BCE
