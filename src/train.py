@@ -6,9 +6,9 @@ from utils.utils import (saveCheckpoint,loadModel,checkaccuarcy,ModelSize,savePr
 from pytorch_lightning import Trainer
 from model.UnetModule import UnetLitModule
 #hyper-parameters
-BATCH_SIZE = 2
+BATCH_SIZE = 10
 LEARNING_RATE =0.0001
-NUM_EPOCHS = 20
+NUM_EPOCHS = 5
 NUM_WORKERS =1
 IMAGE_HEIGHT = 256
 IMAGE_WEDITH = 256
