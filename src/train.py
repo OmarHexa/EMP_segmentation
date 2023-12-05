@@ -4,23 +4,14 @@ from dataset.EMP_datamodule import EmpDataModule
 from tqdm import tqdm
 from pytorch_lightning import Trainer
 from model.UnetModule import UnetLitModule
-#hyper-parameters
-BATCH_SIZE = 5
-LEARNING_RATE =0.0001
-NUM_EPOCHS = 5
-NUM_WORKERS =1
-IMAGE_HEIGHT = 256
-IMAGE_WEDITH = 256
-ITERATION = 2
-LOAD_MODEL = False
-DIRECTROY = "/home/omar/code/pytorch/EMP_data/"
-
+import hydra
+from omegaconf import DictConfig,OmegaConf
    
+@hydra.main(config_path="../configs",config_name="config")
+def main(cfg: DictConfig):
 
-def main(Bilinear=False):
-
-    datamodule = EmpDataModule(DIRECTROY,BATCH_SIZE)
-    model = UnetLitModule()
+    datamodule = EmpDataModule(cfg.directory,cfg.batch_size)
+    model = UnetLitModule(learning_rate=cfg.learning_rate)
 
     # if LOAD_MODEL:
     #     loadModel(torch.load("my_checkpoint.pth.tar"), model)
@@ -35,4 +26,4 @@ def main(Bilinear=False):
 
 
 if __name__=="__main__":
-    main(Bilinear=False)
+    main()
