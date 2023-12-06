@@ -4,7 +4,7 @@ from torch.utils.data import Dataset,DataLoader,random_split
 from PIL import Image
 import torch
 from torchvision import transforms
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 from typing import Optional,List,Tuple,Dict,Any
 from dataclasses import dataclass
 

@@ -1,8 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
-
-import pytorch_lightning as PL
-from pytorch_lightning import LightningDataModule, LightningModule,Callback,Trainer
-from pytorch_lightning.loggers import Logger
+import lightning as L
+from lightning import LightningDataModule, LightningModule,Callback,Trainer
+from lightning.pytorch.loggers import Logger
 
 import hydra
 from omegaconf import DictConfig,OmegaConf
@@ -30,25 +29,27 @@ def main(cfg: DictConfig):
     """
     # set seed for random number generators in pytorch, numpy and python.random
     if cfg.get("seed"):
-        PL.seed_everything(cfg.seed, workers=True)
+        L.seed_everything(cfg.seed, workers=True)
 
-    log.info(f"Instantiating datamodule <{cfg.dataset._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.dataset)
+    log.info(f"Instantiating datamodule <{cfg.data._target_}>")
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
     log.info(f"Instantiating model <{cfg.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
-    
+
     log.info("Instantiating loggers...")
-    logger: List[Logger] = instantiate_loggers(cfg.get("Loggers"))
+    logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
     trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
-    trainer.fit(model,datamodule)
-    
+    if cfg.get("train"):
+        log.info("Starting training!")
+        trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+
 
 if __name__=="__main__":
     main()

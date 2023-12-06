@@ -3,3 +3,4 @@ src/checkpoints
 **/__pycache__/
 outputs
 .vscode/
+logs/

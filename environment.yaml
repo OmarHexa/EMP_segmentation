@@ -1,13 +1,13 @@
-name: empSeg_env
+name: empSeg
+
+
 channels:
   - pytorch
   - defaults
   - conda-forge
 dependencies:
-  - python>=3.7
-  - pip
+  - python>=3.11
+  - pip>=23
   - jupyterlab
   - pip:
-    - -r requirment.txt
-
-
+    - -r requirements.txt

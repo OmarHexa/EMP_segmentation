@@ -1,7 +1,7 @@
 from typing import Any, Dict, Tuple
 
 import torch
-from pytorch_lightning import LightningModule
+from lightning.pytorch import LightningModule
 import torchmetrics
 from torchmetrics import MaxMetric, MeanMetric
 
