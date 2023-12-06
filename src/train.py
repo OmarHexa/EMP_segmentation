@@ -1,13 +1,19 @@
+from typing import Any, Dict, List, Optional, Tuple
 
-from dataset.EMP_datamodule import EmpDataModule
-import pytorch_lightning as pl
-from models.UnetModule import UnetLitModule
+import pytorch_lightning as PL
+from pytorch_lightning import LightningDataModule, LightningModule,Callback,Trainer
+from pytorch_lightning.loggers import Logger
+
 import hydra
 from omegaconf import DictConfig,OmegaConf
 import rootutils
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-from src.utils.utils import RankedLogger
+from src.utils import (
+    RankedLogger,
+    instantiate_callbacks,
+    instantiate_loggers,
+)
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -24,20 +30,25 @@ def main(cfg: DictConfig):
     """
     # set seed for random number generators in pytorch, numpy and python.random
     if cfg.get("seed"):
-        pl.seed_everything(cfg.seed, workers=True)
+        PL.seed_everything(cfg.seed, workers=True)
 
     log.info(f"Instantiating datamodule <{cfg.dataset._target_}>")
-    datamodule: pl.LightningDataModule = hydra.utils.instantiate(cfg.dataset)
+    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.dataset)
 
     log.info(f"Instantiating model <{cfg.model._target_}>")
-    model: pl.LightningModule = hydra.utils.instantiate(cfg.model)
+    model: LightningModule = hydra.utils.instantiate(cfg.model)
 
-   
+    log.info("Instantiating callbacks...")
+    callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+    
+    log.info("Instantiating loggers...")
+    logger: List[Logger] = instantiate_loggers(cfg.get("Loggers"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: pl.Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=None, logger=None)
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
     trainer.fit(model,datamodule)
+    
 
 if __name__=="__main__":
     main()

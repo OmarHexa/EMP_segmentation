@@ -4,5 +4,7 @@ defaults:
   - model: unet
   - paths: default
   - trainer: default
+  - logger: default
+  - callbacks: default
 
 
