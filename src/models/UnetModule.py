@@ -4,7 +4,6 @@ import torch
 from pytorch_lightning import LightningModule
 import torchmetrics
 from torchmetrics import MaxMetric, MeanMetric
-from model.networks.Unet import UNET
 
 class DiceBCELoss(torch.nn.Module):
     def __init__(self, weight=None, size_average=True):
@@ -13,7 +12,7 @@ class DiceBCELoss(torch.nn.Module):
         # Define the dice metric
         self.dice_metric = torchmetrics.Dice()
 
-    def forward(self, inputs, targets, smooth=1):
+    def forward(self, inputs, targets):
 
         #flatten label and prediction tensors
         inputs = inputs.view(-1)
@@ -35,13 +34,16 @@ class DiceBCELoss(torch.nn.Module):
 class UnetLitModule(LightningModule):
     
 
-    def __init__(
-        self,learning_rate=1e-3,compile:bool=False
-        ) -> None:
+    def __init__(self,
+                 net: torch.nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 scheduler: torch.optim.lr_scheduler,
+                 compile: bool=False
+                ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
-        self.net = UNET(3,1)
-        self.learning_rate = learning_rate
+        self.net = net
+
         # loss function
         self.criterion = DiceBCELoss()
 
@@ -121,8 +123,32 @@ class UnetLitModule(LightningModule):
         # otherwise metric would be reset by lightning after each epoch
         self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
 
+    # def configure_optimizers(self) -> Dict[str, Any]:
+    #     return torch.optim.Adam(self.net.parameters(),lr=self.learning_rate)
+    
     def configure_optimizers(self) -> Dict[str, Any]:
-        return torch.optim.Adam(self.net.parameters(),lr=self.learning_rate)
+        """Choose what optimizers and learning-rate schedulers to use in your optimization.
+        Normally you'd need one. But in the case of GANs or similar you might have multiple.
+
+        Examples:
+            https://lightning.ai/docs/pytorch/latest/common/lightning_module.html#configure-optimizers
+
+        :return: A dict containing the configured optimizers and learning-rate schedulers to be used for training.
+        """
+        optimizer = self.hparams.optimizer(params=self.trainer.model.parameters())
+        if self.hparams.scheduler is not None:
+            scheduler = self.hparams.scheduler(optimizer=optimizer)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "monitor": "val/loss",
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
+        return {"optimizer": optimizer}
+    
     def setup(self, stage: str) -> None:
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
         test, or predict.

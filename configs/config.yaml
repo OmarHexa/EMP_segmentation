@@ -1,7 +1,8 @@
+defaults:
+  - _self_
+  - dataset: emp
+  - model: unet
+  - paths: default
+  - trainer: default
 
-learning_rate: 0.0001
-batch_size: 5
-directory: "/home/omar/code/pytorch/EMP_data/"
-image_width: 256
-num_workers: 4
-num_epocs: 10
+
