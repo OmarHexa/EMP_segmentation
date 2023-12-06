@@ -1,22 +1,20 @@
 from typing import Any, Dict, List, Optional, Tuple
-import lightning as L
-from lightning import LightningDataModule, LightningModule,Callback,Trainer
-from lightning.pytorch.loggers import Logger
 
 import hydra
-from omegaconf import DictConfig,OmegaConf
+import lightning as L
 import rootutils
+from lightning import Callback, LightningDataModule, LightningModule, Trainer
+from lightning.pytorch.loggers import Logger
+from omegaconf import DictConfig, OmegaConf
+from torchvision.datasets import MNIST
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-from src.utils import (
-    RankedLogger,
-    instantiate_callbacks,
-    instantiate_loggers,
-)
+from src.utils import RankedLogger, instantiate_callbacks, instantiate_loggers
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
-@hydra.main(config_path="../configs",config_name="config",version_base='1.1')
+
+@hydra.main(config_path="../configs", config_name="train", version_base="1.1")
 def main(cfg: DictConfig):
     """Trains the model. Can additionally evaluate on a testset, using best weights obtained during
     training.
@@ -51,5 +49,5 @@ def main(cfg: DictConfig):
         trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()

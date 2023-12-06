@@ -1,120 +1,198 @@
 from typing import Any, Dict, Tuple
 
 import torch
-from lightning.pytorch import LightningModule
 import torchmetrics
+from lightning.pytorch import LightningModule
 from torchmetrics import MaxMetric, MeanMetric
+
 
 class DiceBCELoss(torch.nn.Module):
     def __init__(self, weight=None, size_average=True):
+        """Custom loss module combining Dice loss and Binary Cross-Entropy loss.
+
+        Args:
+            weight (torch.Tensor, optional): A manual rescaling weight to be applied to the
+                binary cross-entropy loss. Default is None.
+            size_average (bool, optional): Deprecated. By default, the losses are averaged
+                over each loss element in the batch. Default is True.
+
+        Notes:
+            This loss is designed for binary segmentation tasks and utilizes both the Dice loss
+            and Binary Cross-Entropy loss to create a combined loss function.
+
+        Example:
+            >>> loss_function = DiceBCELoss()
+            >>> inputs = torch.randn((batch_size, num_channels, height, width))
+            >>> targets = torch.randint(0, 2, size=(batch_size, 1, height, width)).float()
+            >>> loss = loss_function(inputs, targets)
+        """
         super().__init__()
 
         # Define the dice metric
         self.dice_metric = torchmetrics.Dice()
 
     def forward(self, inputs, targets):
+        """Calculate the combined Dice loss and Binary Cross-Entropy loss.
 
-        #flatten label and prediction tensors
+        Args:
+            inputs (torch.Tensor): Predicted logits from the model.
+            targets (torch.Tensor): Ground truth binary segmentation masks.
+
+        Returns:
+            torch.Tensor: Combined Dice and Binary Cross-Entropy loss.
+
+        Notes:
+            The forward method calculates the Dice loss and Binary Cross-Entropy loss
+            separately and combines them to form the final loss.
+        """
+        # Flatten label and prediction tensors
         inputs = inputs.view(-1)
         targets = targets.view(-1)
-        bce_loss = torch.nn.functional.binary_cross_entropy_with_logits(inputs, targets.float(), reduction='mean')
 
+        # Calculate Binary Cross-Entropy using torch.nn.functional
+        bce_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            inputs, targets.float(), reduction="mean"
+        )
 
         # Calculate Dice using torchmetrics function
         dice_loss = 1 - self.dice_metric(torch.sigmoid(inputs), targets)
-
-        # Calculate Binary Cross-Entropy using torch.nn.functional
 
         # Combine Dice and BCE losses
         dice_bce_loss = bce_loss + dice_loss
 
         return dice_bce_loss
-    
+
 
 class UnetLitModule(LightningModule):
-    
+    def __init__(
+        self,
+        net: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler,
+        compile: bool = False,
+    ) -> None:
+        """Lightning module for a U-Net based image segmentation task.
 
-    def __init__(self,
-                 net: torch.nn.Module,
-                 optimizer: torch.optim.Optimizer,
-                 scheduler: torch.optim.lr_scheduler,
-                 compile: bool=False
-                ) -> None:
+        Args:
+            net (torch.nn.Module): U-Net model for image segmentation.
+            optimizer (torch.optim.Optimizer): Optimizer for training the model.
+            scheduler (torch.optim.lr_scheduler): Learning rate scheduler.
+            compile (bool, optional): Flag indicating whether to compile the model. Default is False.
+
+        Notes:
+            This module combines a U-Net model with a custom loss function (DiceBCELoss) and
+            several metrics for training and evaluation.
+
+        Example:
+            >>> unet_model = UnetLitModule(net=my_unet_model, optimizer=my_optimizer, scheduler=my_scheduler)
+        """
         super().__init__()
         self.save_hyperparameters(logger=False)
         self.net = net
 
-        # loss function
+        # Loss function
         self.criterion = DiceBCELoss()
 
-        # for averaging loss across batches
+        # Metrics
         self.train_loss = MeanMetric()
         self.val_loss = MeanMetric()
-        # for tracking best so far validation accuracy
         self.val_acc_best = MaxMetric()
-        #Validation metrics
-        self.val_acc = torchmetrics.classification.Accuracy(task="binary",num_classes=1,threshold=0.5)
-        self.val_f1 = torchmetrics.classification.F1Score(num_classes=1, task="binary", threshold=0.5)
-        self.val_jaccard = torchmetrics.classification.JaccardIndex(num_classes=1, task="binary", threshold=0.5)
-        #Test metrics
-        self.test_acc = torchmetrics.classification.Accuracy(task="binary",num_classes=1,threshold=0.5)
-        self.test_f1 = torchmetrics.classification.F1Score(num_classes=1, task="binary", threshold=0.5)
-        self.test_jaccard = torchmetrics.classification.JaccardIndex(num_classes=1, task="binary", threshold=0.5)
+
+        self.val_acc = torchmetrics.classification.Accuracy(
+            task="binary", num_classes=1, threshold=0.5
+        )
+        self.val_f1 = torchmetrics.classification.F1Score(
+            num_classes=1, task="binary", threshold=0.5
+        )
+        self.val_jaccard = torchmetrics.classification.JaccardIndex(
+            num_classes=1, task="binary", threshold=0.5
+        )
+
+        self.test_acc = torchmetrics.classification.Accuracy(
+            task="binary", num_classes=1, threshold=0.5
+        )
+        self.test_f1 = torchmetrics.classification.F1Score(
+            num_classes=1, task="binary", threshold=0.5
+        )
+        self.test_jaccard = torchmetrics.classification.JaccardIndex(
+            num_classes=1, task="binary", threshold=0.5
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        
+        """Forward pass of the U-Net model.
+
+        Args:
+            x (torch.Tensor): Input tensor.
+
+        Returns:
+            torch.Tensor: Output tensor from the U-Net model.
+        """
         return self.net(x)
 
     def model_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor]
-        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Perform a single step of the model during training.
+
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): Input batch consisting of images and masks.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Tuple containing loss, ground truth masks,
+            and predicted logits.
+        """
         x, y = batch
         logits = self.forward(x)
-        loss = self.criterion(logits, y>0)
-        return loss, y,logits
+        loss = self.criterion(logits, y > 0)
+        return loss, y, logits
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
-        ) -> torch.Tensor:
-       
-        loss, _,_ = self.model_step(batch)
+    ) -> torch.Tensor:
+        """Training step for the U-Net model.
 
-        # update and log metrics
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): Input batch consisting of images and masks.
+            batch_idx (int): Index of the current batch.
+
+        Returns:
+            torch.Tensor: Loss value for the current training step.
+        """
+        loss, _, _ = self.model_step(batch)
         self.train_loss(loss)
         self.log("train/loss", self.train_loss, on_step=False, on_epoch=True, prog_bar=True)
-
         return loss
 
     def on_train_start(self) -> None:
         """Lightning hook that is called when training begins."""
-        # by default lightning executes validation step sanity checks before training starts,
-        # so it's worth to make sure validation metrics don't store results from these checks
         self.val_loss.reset()
         self.val_acc.reset()
         self.val_acc_best.reset()
+
     def on_train_epoch_end(self) -> None:
-        "Lightning hook that is called when a training epoch ends."
+        """Lightning hook that is called when a training epoch ends."""
         pass
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
+        """Validation step for the U-Net model.
 
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): Input batch consisting of images and masks.
+            batch_idx (int): Index of the current batch.
+        """
         loss, y, logits = self.model_step(batch)
+        self.val_loss(loss)
 
-        # update and log metrics
-        self.val_loss(loss) #using mean metrics 
-        
-        # Compute F1 Score and Jaccard Index
         y_pred = torch.sigmoid(logits)
-        self.val_f1(y_pred, y>0)
-        self.val_jaccard(y_pred, y>0)
-        self.val_acc(y_pred, y>0)
+        self.val_f1(y_pred, y > 0)
+        self.val_jaccard(y_pred, y > 0)
+        self.val_acc(y_pred, y > 0)
 
-        # update and log metrics
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log("val/f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/jaccard", self.val_jaccard, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/accuracy", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
-    
+
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
         acc = self.val_acc.compute()  # get current val acc
@@ -125,7 +203,7 @@ class UnetLitModule(LightningModule):
 
     # def configure_optimizers(self) -> Dict[str, Any]:
     #     return torch.optim.Adam(self.net.parameters(),lr=self.learning_rate)
-    
+
     def configure_optimizers(self) -> Dict[str, Any]:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
         Normally you'd need one. But in the case of GANs or similar you might have multiple.
@@ -148,7 +226,7 @@ class UnetLitModule(LightningModule):
                 },
             }
         return {"optimizer": optimizer}
-    
+
     def setup(self, stage: str) -> None:
         """Lightning hook that is called at the beginning of fit (train + validate), validate,
         test, or predict.
@@ -161,42 +239,48 @@ class UnetLitModule(LightningModule):
         if self.hparams.compile and stage == "fit":
             self.net = torch.compile(self.net)
 
-def test_loss():
-    # Instantiate the loss function
-    loss_fn = DiceBCELoss()
 
-    # Set random seed for reproducibility
-    torch.manual_seed(42)
+# def test_loss():
+#     # Instantiate the loss function
+#     loss_fn = DiceBCELoss()
 
-    # Example usage
-    batch_size = 4
-    image_size = (1, 256, 256)  # Single-channel images of size 256x256
-    inputs = torch.randn(batch_size, *image_size, requires_grad=True)  # Replace with your actual input shape
-    targets = torch.randint(0, 2, (batch_size, *image_size))  # Replace with your actual target shape
-    targets.requires_grad = False  # Ensure targets do not require gradients
+#     # Set random seed for reproducibility
+#     torch.manual_seed(42)
 
-    # Create an optimizer (for illustrative purposes)
-    optimizer = torch.optim.Adam([inputs], lr=0.001)
+#     # Example usage
+#     batch_size = 4
+#     image_size = (1, 256, 256)  # Single-channel images of size 256x256
+#     inputs = torch.randn(
+#         batch_size, *image_size, requires_grad=True
+#     )  # Replace with your actual input shape
+#     targets = torch.randint(
+#         0, 2, (batch_size, *image_size)
+#     )  # Replace with your actual target shape
+#     targets.requires_grad = False  # Ensure targets do not require gradients
 
-    # Forward pass and compute the loss
-    loss = loss_fn(inputs, targets)
+#     # Create an optimizer (for illustrative purposes)
+#     optimizer = torch.optim.Adam([inputs], lr=0.001)
 
-    # Backward pass (for illustrative purposes, you may not need this in testing)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+#     # Forward pass and compute the loss
+#     loss = loss_fn(inputs, targets)
 
-    # Check if the loss is finite
-    assert torch.isfinite(loss).all().item(), "Loss is not finite"
+#     # Backward pass (for illustrative purposes, you may not need this in testing)
+#     optimizer.zero_grad()
+#     loss.backward()
+#     optimizer.step()
 
-    # Check if the gradients are finite
-    assert torch.isfinite(inputs.grad).all().item(), "Gradients are not finite"
+#     # Check if the loss is finite
+#     assert torch.isfinite(loss).all().item(), "Loss is not finite"
 
-    # Check if the loss matches expectations using torch.testing
-    torch.testing.assert_close(loss, torch.tensor(1.306977868), rtol=1e-5, atol=1e-5)
+#     # Check if the gradients are finite
+#     assert torch.isfinite(inputs.grad).all().item(), "Gradients are not finite"
 
-    print("Test passed!")
+#     # Check if the loss matches expectations using torch.testing
+#     torch.testing.assert_close(loss, torch.tensor(1.306977868), rtol=1e-5, atol=1e-5)
+
+#     print("Test passed!")
+
+
 if __name__ == "__main__":
-
-    # model = UnetLitModule()
-    test_loss()
+    model = UnetLitModule()
+    # test_loss()

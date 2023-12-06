@@ -15,7 +15,7 @@ scheduler:
   patience: 10
 
 net:
-  _target_: models.networks.Unet.UNET
+  _target_: models.components.Unet.UNET
   in_channels: 3
   n_classes: 1
 

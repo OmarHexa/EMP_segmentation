@@ -1,39 +1,24 @@
+import logging
+import os
+from typing import Mapping, Optional
 
 import torch
 import torchvision
-import os
-
-import logging
-from typing import Mapping, Optional
-
 from lightning_utilities.core.rank_zero import rank_prefixed_message, rank_zero_only
 
 
-
-
-# taken from pytorch : https://discuss.pytorch.org/t/gpu-memory-that-model-uses/56822
-def ModelSize(model):
-    param_size = sum([param.nelement()*param.element_size() for param in model.parameters()])
-    buffer_size = sum([buf.nelement()*buf.element_size() for buf in model.buffers()])
-
-    size_all_mb = (param_size + buffer_size) / 1024**2
-    print('Model size: {:.3f}MB'.format(size_all_mb))
-
-
-
-
-
-def savePredAsImages(loader,model,folder="predictionImages/"):
+def savePredAsImages(loader, model, folder="predictionImages/"):
+    """Saves prediction and original prediciton into the given folder."""
     if not os.path.exists(folder):
         os.mkdir(folder)
     model.eval()
-    for idx, (img,seg) in enumerate(loader):
-        seg=(seg>0).float().unsqueeze(1)
+    for idx, (img, seg) in enumerate(loader):
+        seg = (seg > 0).float().unsqueeze(1)
         with torch.no_grad():
             preds = torch.sigmoid(model(img))
-            preds = (preds>0.5).float()
-        torchvision.utils.save_image(preds,f"{folder}/preds{idx}.png")
-        torchvision.utils.save_image(seg,f"{folder}/{idx}.png")
+            preds = (preds > 0.5).float()
+        torchvision.utils.save_image(preds, f"{folder}/preds{idx}.png")
+        torchvision.utils.save_image(seg, f"{folder}/{idx}.png")
     model.train()
 
 
@@ -54,6 +39,7 @@ class RankedLogger(logging.LoggerAdapter):
         :param extra: (Optional) A dict-like object which provides contextual information. See `logging.LoggerAdapter`.
         """
         logger = logging.getLogger(name)
+        logging.getLogger("PIL.PngImagePlugin").setLevel(logging.CRITICAL + 1)
         super().__init__(logger=logger, extra=extra)
         self.rank_zero_only = rank_zero_only
 
@@ -82,4 +68,3 @@ class RankedLogger(logging.LoggerAdapter):
                     self.logger.log(level, msg, *args, **kwargs)
                 elif current_rank == rank:
                     self.logger.log(level, msg, *args, **kwargs)
-
