@@ -1,5 +1,5 @@
 
-_target_: models.UnetModule.UnetLitModule
+_target_: src.models.UnetModule.UnetLitModule
 
 optimizer:
   _target_: torch.optim.Adam
@@ -15,7 +15,7 @@ scheduler:
   patience: 10
 
 net:
-  _target_: models.components.Unet.UNET
+  _target_: src.models.components.Unet.UNET
   in_channels: 3
   n_classes: 1
 
