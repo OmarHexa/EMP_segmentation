@@ -1,70 +1,119 @@
-import logging
-import os
-from typing import Mapping, Optional
+import warnings
+from importlib.util import find_spec
+from typing import Any, Callable, Dict, Optional, Tuple
 
-import torch
-import torchvision
-from lightning_utilities.core.rank_zero import rank_prefixed_message, rank_zero_only
+from omegaconf import DictConfig
 
+from src.utils import pylogger, rich_utils
 
-def savePredAsImages(loader, model, folder="predictionImages/"):
-    """Saves prediction and original prediciton into the given folder."""
-    if not os.path.exists(folder):
-        os.mkdir(folder)
-    model.eval()
-    for idx, (img, seg) in enumerate(loader):
-        seg = (seg > 0).float().unsqueeze(1)
-        with torch.no_grad():
-            preds = torch.sigmoid(model(img))
-            preds = (preds > 0.5).float()
-        torchvision.utils.save_image(preds, f"{folder}/preds{idx}.png")
-        torchvision.utils.save_image(seg, f"{folder}/{idx}.png")
-    model.train()
+log = pylogger.RankedLogger(__name__, rank_zero_only=True)
 
 
-class RankedLogger(logging.LoggerAdapter):
-    """A multi-GPU-friendly python command line logger."""
+def extras(cfg: DictConfig) -> None:
+    """Applies optional utilities before the task is started.
 
-    def __init__(
-        self,
-        name: str = __name__,
-        rank_zero_only: bool = False,
-        extra: Optional[Mapping[str, object]] = None,
-    ) -> None:
-        """Initializes a multi-GPU-friendly python command line logger that logs on all processes
-        with their rank prefixed in the log message.
+    Utilities:
+        - Ignoring python warnings
+        - Setting tags from command line
+        - Rich config printing
 
-        :param name: The name of the logger. Default is ``__name__``.
-        :param rank_zero_only: Whether to force all logs to only occur on the rank zero process. Default is `False`.
-        :param extra: (Optional) A dict-like object which provides contextual information. See `logging.LoggerAdapter`.
-        """
-        logger = logging.getLogger(name)
-        logging.getLogger("PIL.PngImagePlugin").setLevel(logging.CRITICAL + 1)
-        super().__init__(logger=logger, extra=extra)
-        self.rank_zero_only = rank_zero_only
+    :param cfg: A DictConfig object containing the config tree.
+    """
+    # return if no `extras` config
+    if not cfg.get("extras"):
+        log.warning("Extras config not found! <cfg.extras=null>")
+        return
 
-    def log(self, level: int, msg: str, rank: Optional[int] = None, *args, **kwargs) -> None:
-        """Delegate a log call to the underlying logger, after prefixing its message with the rank
-        of the process it's being logged from. If `'rank'` is provided, then the log will only
-        occur on that rank/process.
+    # disable python warnings
+    if cfg.extras.get("ignore_warnings"):
+        log.info("Disabling python warnings! <cfg.extras.ignore_warnings=True>")
+        warnings.filterwarnings("ignore")
 
-        :param level: The level to log at. Look at `logging.__init__.py` for more information.
-        :param msg: The message to log.
-        :param rank: The rank to log at.
-        :param args: Additional args to pass to the underlying logging function.
-        :param kwargs: Any additional keyword args to pass to the underlying logging function.
-        """
-        if self.isEnabledFor(level):
-            msg, kwargs = self.process(msg, kwargs)
-            current_rank = getattr(rank_zero_only, "rank", None)
-            if current_rank is None:
-                raise RuntimeError("The `rank_zero_only.rank` needs to be set before use")
-            msg = rank_prefixed_message(msg, current_rank)
-            if self.rank_zero_only:
-                if current_rank == 0:
-                    self.logger.log(level, msg, *args, **kwargs)
-            else:
-                if rank is None:
-                    self.logger.log(level, msg, *args, **kwargs)
-                elif current_rank == rank:
-                    self.logger.log(level, msg, *args, **kwargs)
+    # prompt user to input tags from command line if none are provided in the config
+    if cfg.extras.get("enforce_tags"):
+        log.info("Enforcing tags! <cfg.extras.enforce_tags=True>")
+        rich_utils.enforce_tags(cfg, save_to_file=True)
+
+    # pretty print config tree using Rich library
+    if cfg.extras.get("print_config"):
+        log.info("Printing config tree with Rich! <cfg.extras.print_config=True>")
+        rich_utils.print_config_tree(cfg, resolve=True, save_to_file=True)
+
+
+def task_wrapper(task_func: Callable) -> Callable:
+    """Optional decorator that controls the failure behavior when executing the task function.
+
+    This wrapper can be used to:
+        - make sure loggers are closed even if the task function raises an exception (prevents multirun failure)
+        - save the exception to a `.log` file
+        - mark the run as failed with a dedicated file in the `logs/` folder (so we can find and rerun it later)
+        - etc. (adjust depending on your needs)
+
+    Example:
+    ```
+    @utils.task_wrapper
+    def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        ...
+        return metric_dict, object_dict
+    ```
+
+    :param task_func: The task function to be wrapped.
+
+    :return: The wrapped task function.
+    """
+
+    def wrap(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        # execute the task
+        try:
+            metric_dict, object_dict = task_func(cfg=cfg)
+
+        # things to do if exception occurs
+        except Exception as ex:
+            # save exception to `.log` file
+            log.exception("")
+
+            # some hyperparameter combinations might be invalid or cause out-of-memory errors
+            # so when using hparam search plugins like Optuna, you might want to disable
+            # raising the below exception to avoid multirun failure
+            raise ex
+
+        # things to always do after either success or exception
+        finally:
+            # display output dir path in terminal
+            log.info(f"Output dir: {cfg.paths.output_dir}")
+
+            # always close wandb run (even if exception occurs so multirun won't fail)
+            if find_spec("wandb"):  # check if wandb is installed
+                import wandb
+
+                if wandb.run:
+                    log.info("Closing wandb!")
+                    wandb.finish()
+
+        return metric_dict, object_dict
+
+    return wrap
+
+
+def get_metric_value(metric_dict: Dict[str, Any], metric_name: Optional[str]) -> Optional[float]:
+    """Safely retrieves value of the metric logged in LightningModule.
+
+    :param metric_dict: A dict containing metric values.
+    :param metric_name: If provided, the name of the metric to retrieve.
+    :return: If a metric name was provided, the value of the metric.
+    """
+    if not metric_name:
+        log.info("Metric name is None! Skipping metric value retrieval...")
+        return None
+
+    if metric_name not in metric_dict:
+        raise Exception(
+            f"Metric value not found! <metric_name={metric_name}>\n"
+            "Make sure metric name logged in LightningModule is correct!\n"
+            "Make sure `optimized_metric` name in `hparams_search` config is correct!"
+        )
+
+    metric_value = metric_dict[metric_name].item()
+    log.info(f"Retrieved metric value! <{metric_name}={metric_value}>")
+
+    return metric_value

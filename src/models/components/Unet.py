@@ -228,18 +228,3 @@ class UNET(nn.Module):
         self.up3 = torch.utils.checkpoint.checkpoint(self.up3)
         self.up4 = torch.utils.checkpoint.checkpoint(self.up4)
         self.outc = torch.utils.checkpoint.checkpoint(self.outc)
-
-
-# def Test():
-#     x = torch.randn((20, 3, 256, 256))
-#     print(x.shape)
-
-#     model = UNET(3, 1)
-#     preds = model(x)
-
-#     print(preds.shape)
-
-
-# if __name__ == "__main__":
-
-# Test()

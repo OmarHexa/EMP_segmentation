@@ -191,7 +191,7 @@ class UnetLitModule(LightningModule):
         self.log("val/loss", self.val_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log("val/f1", self.val_f1, on_step=False, on_epoch=True, prog_bar=True)
         self.log("val/jaccard", self.val_jaccard, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/accuracy", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/acc", self.val_acc, on_step=False, on_epoch=True, prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         "Lightning hook that is called when a validation epoch ends."
@@ -199,10 +199,7 @@ class UnetLitModule(LightningModule):
         self.val_acc_best(acc)  # update best so far val acc
         # log `val_acc_best` as a value through `.compute()` method, instead of as a metric object
         # otherwise metric would be reset by lightning after each epoch
-        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=True)
-
-    # def configure_optimizers(self) -> Dict[str, Any]:
-    #     return torch.optim.Adam(self.net.parameters(),lr=self.learning_rate)
+        self.log("val/acc_best", self.val_acc_best.compute(), sync_dist=True, prog_bar=False)
 
     def configure_optimizers(self) -> Dict[str, Any]:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
